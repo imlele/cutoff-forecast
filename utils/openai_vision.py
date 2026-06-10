@@ -2,13 +2,27 @@ import base64
 import io
 import json
 from PIL import Image
-from openai import OpenAI
 import streamlit as st
 import pandas as pd
 
 
+try:
+    from openai import OpenAI
+except ImportError as e:
+    OpenAI = None
+    OPENAI_IMPORT_ERROR = e
+else:
+    OPENAI_IMPORT_ERROR = None
+
+
 @st.cache_resource
-def get_openai_client() -> OpenAI:
+def get_openai_client():
+    if OpenAI is None:
+        raise ImportError(
+            "OpenAI package is not installed correctly. "
+            "Add `openai>=1.40.0` to requirements.txt, commit, and redeploy."
+        ) from OPENAI_IMPORT_ERROR
+
     return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 
@@ -24,10 +38,6 @@ def split_long_image(
     max_height: int = 1800,
     overlap: int = 120,
 ) -> list[Image.Image]:
-    """
-    Split long screenshot into smaller overlapping chunks.
-    """
-
     width, height = image.size
 
     if height <= max_height:
