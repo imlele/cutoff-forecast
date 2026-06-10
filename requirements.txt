@@ -1,8 +1,9 @@
-fastapi
-uvicorn
+streamlit
 pandas
 numpy
+openpyxl
+supabase
 lightgbm
 scikit-learn
 joblib
-pydantic
+requests
