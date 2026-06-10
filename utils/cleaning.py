@@ -196,6 +196,54 @@ def clean_daily_sku_sales_df(df: pd.DataFrame, sale_date, source_file: str) -> p
     return df.reset_index(drop=True)
 
 
+def clean_daily_sku_sales_df(df: pd.DataFrame, sale_date, source_file: str) -> pd.DataFrame:
+    """
+    Expected final output columns:
+    sale_date, rank, sku_no, sku_name, qty, sales_share, amount, raw_text, source_file
+    """
+
+    df = df.copy()
+
+    for col in ["rank", "sku_no", "sku_name", "qty", "sales_share", "amount", "raw_text"]:
+        if col not in df.columns:
+            df[col] = None
+
+    df["sale_date"] = sale_date
+    df["source_file"] = source_file
+
+    df["rank"] = df["rank"].apply(clean_number)
+    df["sku_no"] = df["sku_no"].apply(clean_text)
+    df["sku_name"] = df["sku_name"].apply(clean_text)
+    df["qty"] = df["qty"].apply(clean_number)
+    df["sales_share"] = df["sales_share"].apply(clean_number)
+    df["amount"] = df["amount"].apply(clean_number)
+    df["raw_text"] = df["raw_text"].apply(clean_text)
+
+    # Convert rank to int where possible
+    df["rank"] = df["rank"].apply(lambda x: int(x) if x is not None else None)
+
+    df = df[
+        [
+            "sale_date",
+            "rank",
+            "sku_no",
+            "sku_name",
+            "qty",
+            "sales_share",
+            "amount",
+            "raw_text",
+            "source_file",
+        ]
+    ]
+
+    # This screenshot does not have sku_no, so use sku_name + qty as required fields
+    df = df.dropna(subset=["sale_date", "sku_name", "qty"])
+
+    # Remove duplicate rows from overlap
+    df = df.drop_duplicates(subset=["sale_date", "sku_name"], keep="last")
+
+    return df.reset_index(drop=True)
+
 def dataframe_to_supabase_rows(df: pd.DataFrame) -> list[dict]:
     rows = []
 
