@@ -35,9 +35,14 @@ def image_to_data_url(image: Image.Image, image_format: str = "PNG") -> str:
 
 def split_long_image(
     image: Image.Image,
-    max_height: int = 1800,
-    overlap: int = 120,
+    max_height: int = 1600,
+    overlap: int = 180,
 ) -> list[Image.Image]:
+    """
+    Split long mobile screenshot into overlapping chunks.
+    This screenshot is very tall, so chunking improves detection.
+    """
+
     width, height = image.size
 
     if height <= max_height:
@@ -69,26 +74,46 @@ def detect_daily_sku_rows_from_chunk(
     data_url = image_to_data_url(image)
 
     prompt = """
-You are extracting product sales rows from a long screenshot.
+You are extracting daily product sales data from a long mobile screenshot.
 
-The screenshot may contain Chinese or English columns, such as:
-- 商品规格编码 / SKU / sku_no
-- 商品名称 / Product Name / sku_name
-- 销量 / Quantity / qty
-- 销售额 / Amount / Sales
+The screenshot title may be:
+销售数据
 
-Return JSON only.
+The visible table columns are usually:
+- 排名
+- 商品名称
+- 销量
+- 销量占比
+
+Extract all visible product rows.
+
+Return JSON only with this structure:
+{
+  "rows": [
+    {
+      "rank": 1,
+      "sku_no": null,
+      "sku_name": "三倍厚抹",
+      "qty": 33,
+      "sales_share": 8.4,
+      "amount": null,
+      "raw_text": "1 三倍厚抹 33 8.4%"
+    }
+  ]
+}
 
 Rules:
-- Extract visible product rows only.
-- Do not invent missing values.
-- If sku_no is unclear, use null.
-- If sku_name is unclear, use null.
-- qty must be a number or null.
-- amount must be a number or null.
-- Remove currency symbols and commas from amount.
+- Extract product rows only.
+- Do not extract the header row.
+- Do not invent SKU codes. If SKU code is not visible, use null.
+- 商品名称 goes into sku_name.
+- 销量 goes into qty.
+- 销量占比 goes into sales_share.
+- sales_share should be numeric only. Example: 8.4% becomes 8.4.
+- If a value is unclear, use null.
 - raw_text should contain the original detected row text.
-- If the image chunk has no product sales rows, return {"rows": []}.
+- If there are duplicate visible rows caused by screenshot overlap, still extract them; the app will remove duplicates later.
+- If there are no valid product rows in this chunk, return {"rows": []}.
 """
 
     response = client.responses.create(
@@ -122,6 +147,9 @@ Rules:
                                 "type": "object",
                                 "additionalProperties": False,
                                 "properties": {
+                                    "rank": {
+                                        "type": ["integer", "null"]
+                                    },
                                     "sku_no": {
                                         "type": ["string", "null"]
                                     },
@@ -129,6 +157,9 @@ Rules:
                                         "type": ["string", "null"]
                                     },
                                     "qty": {
+                                        "type": ["number", "null"]
+                                    },
+                                    "sales_share": {
                                         "type": ["number", "null"]
                                     },
                                     "amount": {
@@ -139,9 +170,11 @@ Rules:
                                     },
                                 },
                                 "required": [
+                                    "rank",
                                     "sku_no",
                                     "sku_name",
                                     "qty",
+                                    "sales_share",
                                     "amount",
                                     "raw_text",
                                 ],
@@ -165,6 +198,8 @@ Rules:
 
 
 def detect_daily_sku_rows_from_long_screenshot(uploaded_file) -> pd.DataFrame:
+    uploaded_file.seek(0)
+
     image = Image.open(uploaded_file).convert("RGB")
     chunks = split_long_image(image)
 
@@ -192,7 +227,15 @@ def detect_daily_sku_rows_from_long_screenshot(uploaded_file) -> pd.DataFrame:
     if df.empty:
         return df
 
-    if "raw_text" in df.columns:
+    # Remove overlap duplicates.
+    # Prefer rank + sku_name because raw_text may vary slightly.
+    if "rank" in df.columns and "sku_name" in df.columns:
+        df = df.drop_duplicates(subset=["rank", "sku_name"], keep="first")
+    elif "raw_text" in df.columns:
         df = df.drop_duplicates(subset=["raw_text"], keep="first")
+
+    # Sort by ranking if available
+    if "rank" in df.columns:
+        df = df.sort_values("rank", na_position="last")
 
     return df.reset_index(drop=True)
